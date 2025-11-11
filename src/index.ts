@@ -2,9 +2,8 @@
 import { Command } from 'commander';
 import dotenv from 'dotenv';
 import chalk from 'chalk';
-import backupCommand from './commands/backup';
 import restoreCommand from './commands/restore';
-import testConnectionCommand from './commands/test-connection';
+import testConnectionCommand from './commands/connection_test';
 
 // Load environment variables
 dotenv.config();
@@ -22,8 +21,8 @@ const banner = `
 ║                                                   ║
 ║        Database Backup & Restore CLI Tool         ║
 ║                                                   ║
-║   Support: MySQL, PostgreSQL, MongoDB            ║
-║   Storage: Local, AWS S3, GCS, Azure             ║
+║   Support: MySQL, PostgreSQL, MongoDB             ║
+║   Storage: Local, AWS S3, GCS, Azure              ║
 ║                                                   ║
 ╚═══════════════════════════════════════════════════╝
 `;
@@ -53,7 +52,7 @@ program
     .option('--include-tables <tables>', 'Comma-separated list of tables to include')
     .option('--notify-slack', 'Send Slack notification on completion', false)
     .option('--slack-webhook <url>', 'Slack webhook URL')
-    .action(backupCommand);
+    // .action(backupCommand);
 
 // Restore command
 program

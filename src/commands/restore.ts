@@ -1,11 +1,11 @@
 import ora from 'ora';
 import chalk from 'chalk';
 import fs from 'fs-extra';
-import { DatabaseType, DatabaseConfig, RestoreConfig } from '../types';
 import { MySQLHandler } from '../databases/mysql';
 import logger from "lumilogger";
 import compressionUtil from '../utils/compression';
 import NotificationService from '../utils/notification';
+import {DatabaseConfig, DatabaseType, RestoreConfig} from "../types/types";
 
 interface RestoreOptions {
     type: string;
@@ -57,11 +57,13 @@ async function restoreCommand(options: RestoreOptions) {
         const restoreConfig: RestoreConfig = {
             backupFile: options.file,
             targetDatabase: options.database,
-            tables: options.tables?.split(',').map(t => t.trim())
+            tables: typeof options.tables === 'string'
+                ? options.tables.split(',').map(t => t.trim())
+                : undefined,
         };
 
         spinner.text = 'Testing database connection...';
-        logger.logRestoreStart(dbConfig.database, options.file);
+        logger.info(dbConfig.database, options.file);
 
         // Create database handler
         let handler;
@@ -103,7 +105,7 @@ async function restoreCommand(options: RestoreOptions) {
         const duration = Date.now() - startTime;
 
         // Log completion
-        logger.logRestoreComplete(dbConfig.database, duration);
+        logger.info(dbConfig.database, duration);
 
         // Send notification if requested
         if (options.notifySlack) {
@@ -130,7 +132,7 @@ async function restoreCommand(options: RestoreOptions) {
     } catch (error: any) {
         spinner.fail(chalk.red('Restore failed'));
         console.error(chalk.red(`\n✗ Error: ${error.message}\n`));
-        logger.logRestoreError(options.database, error);
+        logger.info(options.database, error);
 
         // Send failure notification
         if (options.notifySlack) {

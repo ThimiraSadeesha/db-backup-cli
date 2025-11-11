@@ -5,6 +5,14 @@ import logger from "lumilogger";
 import {DatabaseConfig, DatabaseType} from "../types/types";
 
 
+interface TestConnectionOptions {
+    type: string;
+    host: string;
+    database: string;
+    port?: string;
+    user?: string;
+    password?: string;
+}
 
 async function testConnectionCommand(options: TestConnectionOptions) {
     const spinner = ora('Testing database connection...').start();
