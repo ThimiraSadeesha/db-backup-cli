@@ -1,57 +1,42 @@
 import mysql from 'mysql2/promise';
-import {MySQLConfig} from "../types/mysql";
-import logger from "lumilogger";
+import dotenv from 'dotenv';
+dotenv.config();
 
-export async function testConnection(config: MySQLConfig) {
-    let connection;
-
+async function testConnection(host: string, port: number, user: string, password: string, database: string) {
     try {
-        logger.log('🔄 Testing MySQL connection...');
-        logger.log(`📍 Host: ${config.host}:${config.port}`);
-        logger.log(`👤 User: ${config.user}`);
-        logger.log(`🗄️  Database: ${config.database}`);
-
-        connection = await mysql.createConnection(config);
+        const connection = await mysql.createConnection({ host, port, user, password, database });
         await connection.ping();
-
-        // Get server version for additional info
-        const [rows] = await connection.query('SELECT VERSION() as version');
-        const version = (rows as any)[0]?.version;
-
-        logger.log('✅ MySQL connection successful!');
-        if (version) {
-            logger.log(`📦 Server version: ${version}`);
-        }
-
         await connection.end();
+        console.log(`✅ Connection successful: ${host}:${port} -> ${database}`);
         return true;
-    } catch (error) {
-        logger.error('❌ MySQL connection failed');
-
-        if (error instanceof Error) {
-            // Provide more specific error messages
-            if (error.message.includes('ECONNREFUSED')) {
-                logger.error('   Connection refused - check if MySQL is running and accessible');
-            } else if (error.message.includes('ER_ACCESS_DENIED_ERROR')) {
-                logger.error('   Access denied - check username and password');
-            } else if (error.message.includes('ENOTFOUND')) {
-                logger.error('   Host not found - check the host address');
-            } else if (error.message.includes('ER_BAD_DB_ERROR')) {
-                logger.error('   Database does not exist');
-            } else {
-                logger.error(`   ${error.message}`);
-            }
-        } else {
-            logger.error('   Unknown error:', error);
-        }
-
+    } catch (err) {
+        console.error(`❌ Connection failed: ${host}:${port} -> ${database}`);
+        console.error(err);
         return false;
-    } finally {
-        if (connection) {
-            try {
-                await connection.end();
-            } catch (closeError) {
-            }
-        }
     }
 }
+
+(async () => {
+    console.log('🔄 Testing source database...');
+    const srcOk = await testConnection(
+        process.env.SRC_DB_HOST!,
+        Number(process.env.SRC_DB_PORT!),
+        process.env.SRC_DB_USER!,
+        process.env.SRC_DB_PWD!,
+        process.env.SRC_DB_NAME!
+    );
+
+    console.log('🔄 Testing target database...');
+    const tgtOk = await testConnection(
+        process.env.TGT_DB_HOST!,
+        Number(process.env.TGT_DB_PORT!),
+        process.env.TGT_DB_USER!,
+        process.env.TGT_DB_PWD!,
+        process.env.TGT_DB_NAME!
+    );
+    if (srcOk && tgtOk) {
+        console.log('🎯 Both databases are reachable. Ready to copy!');
+    } else {
+        console.log('⚠️ One or both databases are not reachable. Fix connection settings.');
+    }
+})();
