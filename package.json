@@ -4,14 +4,14 @@
   "description": "A comprehensive database backup and restore CLI tool",
   "main": "dist/index.js",
   "bin": {
-    "db-backup": "./dist/index.js"
+    "snap-db": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "test": "jest",
-    "prepare": "npm run build"
+    "dev": "ts-node src/cli.ts",
+    "test": "ts-node ./src/tests/test-cli.ts",
+    "prepublishOnly": "npm run build",
+    "link": "npm run build && npm link"
   },
   "keywords": [
     "database",
@@ -33,6 +33,7 @@
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
     "dotenv": "^16.6.1",
+    "figlet": "^1.9.4",
     "fs-extra": "^11.2.0",
     "inquirer": "^8.2.6",
     "lumilogger": "^2.0.1",
