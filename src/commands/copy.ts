@@ -1,60 +1,72 @@
-import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
-import {formatValue} from "../utils/utill";
+import ora from 'ora';
+import chalk from 'chalk';
 
-dotenv.config();
+import { confirmAction } from '../utils/prompts';
+import { getConnection } from '../utils/connection';
+import {DBConfig} from "../types/types";
 
-async function copyDatabase() {
-    const src = await mysql.createConnection({
-        host: process.env.SRC_DB_HOST!,
-        port: Number(process.env.SRC_DB_PORT!),
-        user: process.env.SRC_DB_USER!,
-        password: process.env.SRC_DB_PWD!,
-        database: process.env.SRC_DB_NAME!,
-        multipleStatements: true
-    });
-    const tgt = await mysql.createConnection({
-        host: process.env.TGT_DB_HOST!,
-        port: Number(process.env.TGT_DB_PORT!),
-        user: process.env.TGT_DB_USER!,
-        password: process.env.TGT_DB_PWD!,
-        database: process.env.TGT_DB_NAME!,
-        multipleStatements: true
-    });
-    console.log('🔄 Starting database copy...');
-    await tgt.query('SET FOREIGN_KEY_CHECKS=0;');
-    const [tables] = await src.query<any[]>(`SHOW TABLES`);
-    const tableKey = `Tables_in_${process.env.SRC_DB_NAME}`;
-    for (const table of tables) {
-        const tableName = table[tableKey];
-        console.log(`📦 Copying table: ${tableName}`);
-        try {
-            const [createSQL] = await src.query<any[]>(`SHOW CREATE TABLE \`${tableName}\``);
-            const sql = createSQL[0]['Create Table'];
-            await tgt.query(`DROP TABLE IF EXISTS \`${tableName}\``);
-            await tgt.query(sql);
-            const [rows] = await src.query<any[]>(`SELECT *
-                                                   FROM \`${tableName}\``);
-            if (rows.length > 0) {
-                const columns = Object.keys(rows[0]).map(c => `\`${c}\``).join(',');
-                const chunkSize = 500;
-                for (let i = 0; i < rows.length; i += chunkSize) {
-                    const chunk = rows.slice(i, i + chunkSize);
-                    const values = chunk.map(r =>
-                        `(${Object.values(r).map(formatValue).join(',')})`
-                    ).join(',');
-                    await tgt.query(`INSERT INTO \`${tableName}\` (${columns})
-                                     VALUES ${values}`);
+export async function copyCommand(srcConfig: DBConfig, tgtConfig: DBConfig): Promise<void> {
+    console.log(chalk.yellow(`\n⚠️  Warning: This will replace all data in ${tgtConfig.database}`));
+    const confirmed = await confirmAction(
+        `Copy from ${srcConfig.database} to ${tgtConfig.database}?`
+    );
+
+    if (!confirmed) {
+        console.log(chalk.red('❌ Operation cancelled'));
+        return;
+    }
+
+    const spinner = ora('Starting copy process...').start();
+
+    try {
+        const srcConn = await getConnection(srcConfig);
+        const tgtConn = await getConnection(tgtConfig);
+
+        // Get all tables from source
+        spinner.text = 'Reading source database schema...';
+        const [tables] = await srcConn.query<any[]>('SHOW TABLES');
+        const tableNames = tables.map((t) => Object.values(t)[0] as string);
+
+        spinner.text = `Found ${tableNames.length} tables to copy`;
+
+        // Disable foreign key checks
+        await tgtConn.query('SET FOREIGN_KEY_CHECKS = 0');
+
+        for (let i = 0; i < tableNames.length; i++) {
+            const tableName = tableNames[i];
+            spinner.text = `Copying table ${i + 1}/${tableNames.length}: ${tableName}`;
+
+            // Get CREATE TABLE statement
+            const [createStmt] = await srcConn.query<any[]>(`SHOW CREATE TABLE \`${tableName}\``);
+            const createSQL = createStmt[0]['Create Table'];
+
+            // Drop and recreate table
+            await tgtConn.query(`DROP TABLE IF EXISTS \`${tableName}\``);
+            await tgtConn.query(createSQL);
+
+            // Copy data
+            const [rows] = await srcConn.query(`SELECT * FROM \`${tableName}\``);
+
+            if (Array.isArray(rows) && rows.length > 0) {
+                const columns = Object.keys(rows[0]);
+                const placeholders = columns.map(() => '?').join(',');
+                const insertSQL = `INSERT INTO \`${tableName}\` (${columns.map((c) => `\`${c}\``).join(',')}) VALUES (${placeholders})`;
+
+                for (const row of rows as any[]) {
+                    const values = columns.map((col) => (row as any)[col]);
+                    await tgtConn.query(insertSQL, values);
                 }
             }
-        } catch (err: any) {
-            console.error(`❌ Error copying table ${tableName}:`, err.message);
         }
-    }
-    await tgt.query('SET FOREIGN_KEY_CHECKS=1;');
-    console.log('✅ Database copy completed successfully!');
-    await src.end();
-    await tgt.end();
-}
 
-copyDatabase().catch(err => console.error('❌ Unexpected error during database copy:', err));
+        // Re-enable foreign key checks
+        await tgtConn.query('SET FOREIGN_KEY_CHECKS = 1');
+
+        await srcConn.end();
+        await tgtConn.end();
+
+        spinner.succeed(chalk.green(`Successfully copied ${tableNames.length} tables from ${srcConfig.database} to ${tgtConfig.database}`));
+    } catch (error: any) {
+        spinner.fail(chalk.red(`Copy failed: ${error.message}`));
+    }
+}

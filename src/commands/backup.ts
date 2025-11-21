@@ -1,61 +1,83 @@
-import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
+import ora from 'ora';
+import fs from 'fs/promises';
+import chalk from 'chalk';
 
-dotenv.config();
+import { getConnection } from '../utils/connection';
+import {DBConfig} from "../types/types";
+export async function backupCommand(config: DBConfig, outputFile?: string): Promise<void> {
+    const spinner = ora('Starting backup process...').start();
 
-const backupDir = path.resolve(process.env.BACKUP_DIR || './backups');
-if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+    try {
+        // Create backups folder if it doesn't exist
+        const path = './backups';
+        await fs.mkdir(path, { recursive: true });
 
-function formatValue(v: any) {
-    if (v === null || v === undefined) return 'NULL';
-    if (v instanceof Date) {
-        const yyyy = v.getFullYear();
-        const mm = String(v.getMonth() + 1).padStart(2, '0');
-        const dd = String(v.getDate()).padStart(2, '0');
-        const hh = String(v.getHours()).padStart(2, '0');
-        const mi = String(v.getMinutes()).padStart(2, '0');
-        const ss = String(v.getSeconds()).padStart(2, '0');
-        return `'${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}'`;
-    }
-    return `'${v.toString().replace(/'/g,"\\'")}'`;
-}
+        // Determine filename
+        const filename = outputFile || `${path}/backup_${config.database}_${Date.now()}.sql`;
 
-async function backupDatabase() {
-    const host = process.env.SRC_DB_HOST!;
-    const port = Number(process.env.SRC_DB_PORT!);
-    const user = process.env.SRC_DB_USER!;
-    const password = process.env.SRC_DB_PWD!;
-    const database = process.env.SRC_DB_NAME!;
-    const connection = await mysql.createConnection({ host, port, user, password, database, multipleStatements: true });
-    const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupFile = path.join(backupDir, `${database}_${dateStr}.sql`);
-    const writeStream = fs.createWriteStream(backupFile, { flags: 'w' });
-    console.log(`🔄 Starting backup of database: ${database}`);
-    console.log(`📁 Backup location: ${backupFile}`);
-    const [tables] = await connection.query<any[]>(`SHOW TABLES`);
-    const tableKey = `Tables_in_${database}`;
-    for (const table of tables) {
-        const tableName = table[tableKey];
-        console.log(`📦 Backing up table: ${tableName}`);
-        const [createSQL] = await connection.query<any[]>(`SHOW CREATE TABLE \`${tableName}\``);
-        writeStream.write(`${createSQL[0]['Create Table']};\n\n`);
-        const [rows] = await connection.query<any[]>(`SELECT * FROM \`${tableName}\``);
-        if (rows.length > 0) {
-            const columns = Object.keys(rows[0]).map(c => `\`${c}\``).join(',');
-            const chunkSize = 500;
-            for (let i = 0; i < rows.length; i += chunkSize) {
-                const chunk = rows.slice(i, i + chunkSize);
-                const values = chunk.map(r => `(${Object.values(r).map(formatValue).join(',')})`).join(',');
-                writeStream.write(`INSERT INTO \`${tableName}\` (${columns}) VALUES ${values};\n`);
+        spinner.text = 'Connecting to database...';
+        const connection = await getConnection(config);
+
+        let sqlDump = `-- MySQL Database Backup\n`;
+        sqlDump += `-- Database: ${config.database}\n`;
+        sqlDump += `-- Date: ${new Date().toISOString()}\n\n`;
+        sqlDump += `SET FOREIGN_KEY_CHECKS=0;\n\n`;
+
+        // Get all tables
+        spinner.text = 'Reading database schema...';
+        const [tables] = await connection.query<any[]>('SHOW TABLES');
+        const tableNames = tables.map((t) => Object.values(t)[0] as string);
+
+        spinner.text = `Backing up ${tableNames.length} tables...`;
+
+        for (let i = 0; i < tableNames.length; i++) {
+            const tableName = tableNames[i];
+            spinner.text = `Backing up table ${i + 1}/${tableNames.length}: ${tableName}`;
+
+            // Get CREATE TABLE statement
+            const [createStmt] = await connection.query<any[]>(`SHOW CREATE TABLE \`${tableName}\``);
+            const createSQL = createStmt[0]['Create Table'];
+
+            sqlDump += `--\n-- Table structure for \`${tableName}\`\n--\n\n`;
+            sqlDump += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
+            sqlDump += createSQL + ';\n\n';
+
+            // Get table data
+            const [rows] = await connection.query(`SELECT * FROM \`${tableName}\``);
+
+            if (Array.isArray(rows) && rows.length > 0) {
+                sqlDump += `--\n-- Dumping data for table \`${tableName}\`\n--\n\n`;
+
+                const columns = Object.keys(rows[0]);
+                sqlDump += `INSERT INTO \`${tableName}\` (${columns.map((c) => `\`${c}\``).join(', ')}) VALUES\n`;
+
+                const values: string[] = [];
+                for (const row of rows as any[]) {
+                    const rowValues = columns.map((col) => {
+                        const val = (row as any)[col];
+                        if (val === null) return 'NULL';
+                        if (typeof val === 'number') return val.toString();
+                        if (val instanceof Date) return `'${val.toISOString().slice(0, 19).replace('T', ' ')}'`;
+                        if (typeof val === 'string') return `'${val.replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
+                        return `'${String(val).replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
+                    });
+                    values.push(`(${rowValues.join(', ')})`);
+                }
+
+                sqlDump += values.join(',\n') + ';\n\n';
             }
         }
-        writeStream.write('\n');
-    }
-    writeStream.close();
-    await connection.end();
-    console.log('✅ Backup completed successfully!');
-}
 
-backupDatabase().catch(err => console.error('❌ Unexpected error:', err));
+        sqlDump += `SET FOREIGN_KEY_CHECKS=1;\n`;
+
+        // Write to file
+        spinner.text = 'Writing backup file...';
+        await fs.writeFile(filename, sqlDump, 'utf-8');
+
+        await connection.end();
+
+        spinner.succeed(chalk.green(`Backup completed: ${filename} (${tableNames.length} tables)`));
+    } catch (error: any) {
+        spinner.fail(chalk.red(`Backup failed: ${error.message}`));
+    }
+}
