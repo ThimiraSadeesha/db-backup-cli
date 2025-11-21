@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - main
-      - 'release/*'
+      - feature/dev      # Only build on feature/dev and main
   pull_request:
     branches:
       - main
-      - 'release/*'
+      - feature/dev
 
 jobs:
   build-and-test:
@@ -23,7 +23,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
@@ -38,5 +38,5 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
-      - name: Verify build
+      - name: Verify build output
         run: ls -la dist

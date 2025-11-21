@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/cli.ts",
+    "test": "ts-node ./src/tests/test-cli.ts",
     "prepublishOnly": "npm run build",
     "link": "npm run build && npm link"
   },
