@@ -1,19 +1,19 @@
 import ora from 'ora';
 import fs from 'fs/promises';
 import chalk from 'chalk';
-
+import os from 'os';
+import path from 'path';
 import { getConnection } from '../utils/connection';
-import {DBConfig} from "../types/types";
-export async function backupCommand(config: DBConfig, outputFile?: string): Promise<void> {
+import { DBConfig } from '../types/types';
+
+export async function backupCommand(config: DBConfig, outputFile?: string){
     const spinner = ora('Starting backup process...').start();
 
     try {
-        // Create backups folder if it doesn't exist
-        const path = './backups';
-        await fs.mkdir(path, { recursive: true });
-
-        // Determine filename
-        const filename = outputFile || `${path}/backup_${config.database}_${Date.now()}.sql`;
+        const desktopPath = path.join(os.homedir(), 'Desktop');
+        const backupFolder = path.join(desktopPath, 'backups');
+        await fs.mkdir(backupFolder, { recursive: true });
+        const filename = outputFile || path.join(backupFolder, `backup_${config.database}_${Date.now()}.sql`);
 
         spinner.text = 'Connecting to database...';
         const connection = await getConnection(config);
@@ -23,7 +23,6 @@ export async function backupCommand(config: DBConfig, outputFile?: string): Prom
         sqlDump += `-- Date: ${new Date().toISOString()}\n\n`;
         sqlDump += `SET FOREIGN_KEY_CHECKS=0;\n\n`;
 
-        // Get all tables
         spinner.text = 'Reading database schema...';
         const [tables] = await connection.query<any[]>('SHOW TABLES');
         const tableNames = tables.map((t) => Object.values(t)[0] as string);
@@ -33,16 +32,11 @@ export async function backupCommand(config: DBConfig, outputFile?: string): Prom
         for (let i = 0; i < tableNames.length; i++) {
             const tableName = tableNames[i];
             spinner.text = `Backing up table ${i + 1}/${tableNames.length}: ${tableName}`;
-
-            // Get CREATE TABLE statement
             const [createStmt] = await connection.query<any[]>(`SHOW CREATE TABLE \`${tableName}\``);
             const createSQL = createStmt[0]['Create Table'];
-
             sqlDump += `--\n-- Table structure for \`${tableName}\`\n--\n\n`;
             sqlDump += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
             sqlDump += createSQL + ';\n\n';
-
-            // Get table data
             const [rows] = await connection.query(`SELECT * FROM \`${tableName}\``);
 
             if (Array.isArray(rows) && rows.length > 0) {
@@ -69,8 +63,6 @@ export async function backupCommand(config: DBConfig, outputFile?: string): Prom
         }
 
         sqlDump += `SET FOREIGN_KEY_CHECKS=1;\n`;
-
-        // Write to file
         spinner.text = 'Writing backup file...';
         await fs.writeFile(filename, sqlDump, 'utf-8');
 
@@ -80,4 +72,5 @@ export async function backupCommand(config: DBConfig, outputFile?: string): Prom
     } catch (error: any) {
         spinner.fail(chalk.red(`Backup failed: ${error.message}`));
     }
+
 }
