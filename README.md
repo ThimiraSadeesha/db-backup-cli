@@ -22,7 +22,7 @@ Node.js 18.0 or higher
 ## 🚀 Usage
 
 ```bash
-  snap-db
+   repliq-db
 ```
 * Follow the interactive menu to:
 

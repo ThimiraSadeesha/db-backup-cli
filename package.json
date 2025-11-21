@@ -1,10 +1,10 @@
 {
-  "name": "local-db",
-  "version": "1.1.1",
+  "name": "repliq-db",
+  "version": "1.0.0",
   "description": "A comprehensive database backup and restore CLI tool",
   "main": "dist/index.js",
   "bin": {
-    "local-db": "./dist/cli.js"
+    "repliq-db": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
